@@ -98,6 +98,7 @@ interface Fake {
   commands: Map<string, any>;
   infos: Map<string, any>;
   outputs: string[];
+  syntheticCalls: Array<{ sessionID: string; text: string; resume?: boolean }>;
   cleanup: (() => Promise<void> | void) | undefined;
   emit: (event: unknown) => void;
 }
@@ -111,6 +112,7 @@ async function fake(opts: {
   const commands = new Map<string, any>();
   const infos = new Map<string, any>();
   const outputs: string[] = [];
+  const syntheticCalls: Array<{ sessionID: string; text: string; resume?: boolean }> = [];
   const queue: unknown[] = [];
   let wake: (() => void) | null = null;
   let aborted = false;
@@ -158,10 +160,13 @@ async function fake(opts: {
           }
         );
       }),
-      synthetic: jest.fn(async ({ text }: { sessionID: string; text: string }) => {
-        outputs.push(text);
-        return {};
-      }),
+      synthetic: jest.fn(
+        async ({ sessionID, text, resume }: { sessionID: string; text: string; resume?: boolean }) => {
+          outputs.push(text);
+          syntheticCalls.push({ sessionID, text, resume });
+          return {};
+        },
+      ),
     },
     tool: {
       hook: jest.fn(async (name: string, cb: (event: any) => unknown) => {
@@ -194,6 +199,7 @@ async function fake(opts: {
     commands,
     infos,
     outputs,
+    syntheticCalls,
     cleanup: typeof cleanup === "function" ? cleanup : undefined,
     emit(event: unknown) {
       queue.push(event);
@@ -467,6 +473,20 @@ describe("commands", () => {
       expect(command.description).toBeTruthy();
       expect(typeof command.execute).toBe("function");
     }
+    await f.cleanup?.();
+  });
+
+  it("writes command output without resuming the model", async () => {
+    const f = await fake();
+    await f.commands.get("pushtodisplay-status")!.execute({
+      sessionID: "s1",
+      prompt: { text: "" },
+      delivery: "steer",
+    });
+    expect(f.syntheticCalls.at(-1)).toMatchObject({
+      sessionID: "s1",
+      resume: false,
+    });
     await f.cleanup?.();
   });
 

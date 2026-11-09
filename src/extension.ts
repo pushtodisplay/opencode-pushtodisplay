@@ -554,7 +554,7 @@ export function createSetup(deps: SetupDeps = {}): (ctx: Context) => Promise<Cle
     // ---- commands ----------------------------------------------------------
     async function output(sessionID: SessionID, text: string): Promise<void> {
       try {
-        await ctx.session.synthetic({ sessionID, text });
+        await ctx.session.synthetic({ sessionID, text, resume: false });
       } catch (err) {
         console.error("[pushtodisplay] could not write command output:", (err as Error)?.message ?? err);
       }
