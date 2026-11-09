@@ -17,15 +17,22 @@ describe("TUI part", () => {
     interface TestEvent {
       data: {
         sessionID: string;
-        text: string;
-        metadata?: Record<string, unknown>;
+        inboxID: string;
+        item: {
+          type: string;
+          payload: {
+            text: string;
+            metadata?: Record<string, unknown>;
+          };
+          delivery: "steer" | "queue";
+        };
       };
     }
     const show = jest.fn();
     let handler: ((event: TestEvent) => void) | undefined;
     const stop = plugin.setup({
       data: {
-        on: (_type: "session.synthetic", cb: (event: TestEvent) => void) => {
+        on: (_type: "session.inbox.enqueued", cb: (event: TestEvent) => void) => {
           handler = cb;
           return () => {};
         },
@@ -34,12 +41,28 @@ describe("TUI part", () => {
     });
 
     handler?.({
-      data: { sessionID: "s1", text: "not ours", metadata: { source: "other" } },
+      data: {
+        sessionID: "s1",
+        inboxID: "inbox-1",
+        item: {
+          type: "synthetic",
+          payload: { text: "not ours", metadata: { source: "other" } },
+          delivery: "steer",
+        },
+      },
     });
     expect(show).not.toHaveBeenCalled();
 
     handler?.({
-      data: { sessionID: "s1", text: "Panel cleared", metadata: { source: "pushtodisplay" } },
+      data: {
+        sessionID: "s1",
+        inboxID: "inbox-2",
+        item: {
+          type: "synthetic",
+          payload: { text: "Panel cleared", metadata: { source: "pushtodisplay" } },
+          delivery: "steer",
+        },
+      },
     });
     expect(show).toHaveBeenCalledWith(
       expect.objectContaining({

@@ -1,26 +1,34 @@
 /**
  * TUI part of opencode-pushtodisplay.
  *
- * The server part writes command output as synthetic messages with
+ * The server part writes command output as synthetic inbox messages with
  * `resume: false`, so it never starts a model turn. Those messages are not
- * rendered until the session runs again, so this part mirrors the same
- * messages as TUI toasts: immediate feedback without an assistant response.
+ * rendered until the session runs again, so this part mirrors them as TUI
+ * toasts on admission: immediate feedback without an assistant response.
  */
 const SOURCE = "pushtodisplay";
 
 type ToastVariant = "info" | "success" | "warning" | "error";
 
-interface SynthesisEvent {
+interface InboxEnqueuedEvent {
   data: {
     sessionID: string;
-    text: string;
-    metadata?: Record<string, unknown>;
+    inboxID: string;
+    item: {
+      type: string;
+      payload?: {
+        text?: string;
+        description?: string;
+        metadata?: Record<string, unknown>;
+      };
+      delivery?: "steer" | "queue";
+    };
   };
 }
 
 interface TuiContext {
   data: {
-    on(type: "session.synthetic", handler: (event: SynthesisEvent) => void): () => void;
+    on(type: "session.inbox.enqueued", handler: (event: InboxEnqueuedEvent) => void): () => void;
   };
   ui: {
     toast: {
@@ -45,9 +53,11 @@ export function toastVariant(text: string): ToastVariant {
 export default {
   id: "pushtodisplay.tui",
   setup(context: TuiContext): () => void {
-    return context.data.on("session.synthetic", (event) => {
-      if (event.data.metadata?.source !== SOURCE) return;
-      const text = event.data.text;
+    return context.data.on("session.inbox.enqueued", (event) => {
+      const item = event.data.item;
+      if (item.type !== "synthetic") return;
+      if (item.payload?.metadata?.source !== SOURCE) return;
+      const text = item.payload.text;
       if (!text) return;
       context.ui.toast.show({
         title: "Push To Display",
