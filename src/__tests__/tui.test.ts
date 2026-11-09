@@ -29,6 +29,7 @@ describe("TUI part", () => {
       };
     }
     const show = jest.fn();
+    const alert = jest.fn(async () => {});
     let handler: ((event: TestEvent) => void) | undefined;
     const stop = plugin.setup({
       data: {
@@ -37,7 +38,7 @@ describe("TUI part", () => {
           return () => {};
         },
       },
-      ui: { toast: { show } },
+      ui: { toast: { show }, dialog: { alert } },
     });
 
     handler?.({
@@ -71,6 +72,25 @@ describe("TUI part", () => {
         sessionID: "s1",
       }),
     );
+
+    handler?.({
+      data: {
+        sessionID: "s1",
+        inboxID: "inbox-3",
+        item: {
+          type: "synthetic",
+          payload: {
+            text: "Open https://idp.example/device in a browser — code: ABCD-1234",
+            metadata: { source: "pushtodisplay" },
+          },
+          delivery: "steer",
+        },
+      },
+    });
+    expect(alert).toHaveBeenCalledWith({
+      title: "Push To Display login",
+      message: "Open https://idp.example/device in a browser — code: ABCD-1234",
+    });
 
     stop();
   });

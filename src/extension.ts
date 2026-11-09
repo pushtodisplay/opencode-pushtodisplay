@@ -597,7 +597,7 @@ export function createSetup(deps: SetupDeps = {}): (ctx: Context) => Promise<Cle
 
       let out = "";
       let opened = false;
-      let shown = false;
+      let announced = false;
 
       const relay = (chunk: Buffer | string) => {
         out += chunk.toString();
@@ -615,12 +615,13 @@ export function createSetup(deps: SetupDeps = {}): (ctx: Context) => Promise<Cle
           "";
         if (url && !opened) {
           opened = true;
-          void output(sessionID, `Open ${url} in a browser to approve Push To Display.`);
           void openBrowser(url);
         }
-        if (code && !shown) {
-          shown = true;
-          void output(sessionID, `Approve in the browser — code: ${code}`);
+        // One message carries both the link and the code so the TUI can show
+        // them together instead of replacing one toast with another.
+        if (url && code && !announced) {
+          announced = true;
+          void output(sessionID, `Open ${url} in a browser — code: ${code}`);
         }
       };
 

@@ -40,6 +40,9 @@ interface TuiContext {
         sessionID?: string;
       }): void;
     };
+    dialog: {
+      alert(options: { title?: string; message: string }): Promise<void>;
+    };
   };
 }
 
@@ -59,11 +62,19 @@ export default {
       if (item.payload?.metadata?.source !== SOURCE) return;
       const text = item.payload.text;
       if (!text) return;
+      // Login output contains the verification link and device code. A toast
+      // is too transient for that; keep it in a dialog until dismissed.
+      if (/https?:\/\//.test(text)) {
+        void context.ui.dialog
+          .alert({ title: "Push To Display login", message: text })
+          .catch(() => {});
+        return;
+      }
       context.ui.toast.show({
         title: "Push To Display",
         message: text,
         variant: toastVariant(text),
-        duration: /https?:\/\//.test(text) ? 20_000 : 8_000,
+        duration: 8_000,
         sessionID: event.data.sessionID,
       });
     });
