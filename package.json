@@ -1,6 +1,6 @@
 {
   "name": "opencode-pushtodisplay",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Mirror OpenCode agent activity onto your Push To Display board as a shared, human-readable log (lifecycle, tasks, tool steps, alerts, errors)",
   "type": "module",
   "keywords": [
@@ -33,7 +33,8 @@
     "node": ">=18.0.0"
   },
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./tui": "./src/tui.ts"
   },
   "files": [
     "src/*.ts",
