@@ -62,9 +62,10 @@ export default {
       if (item.payload?.metadata?.source !== SOURCE) return;
       const text = item.payload.text;
       if (!text) return;
-      // Login output contains the verification link and device code. A toast
-      // is too transient for that; keep it in a dialog until dismissed.
-      if (/https?:\/\//.test(text)) {
+      // Login output contains the verification link, device code, and the
+      // final result. A toast is too transient for that; keep it in a dialog
+      // until dismissed.
+      if (item.payload.metadata?.kind === "login" || /https?:\/\//.test(text)) {
         void context.ui.dialog
           .alert({ title: "Push To Display login", message: text })
           .catch(() => {});

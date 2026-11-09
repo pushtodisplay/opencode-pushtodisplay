@@ -92,6 +92,25 @@ describe("TUI part", () => {
       message: "Open https://idp.example/device in a browser — code: ABCD-1234",
     });
 
+    handler?.({
+      data: {
+        sessionID: "s1",
+        inboxID: "inbox-4",
+        item: {
+          type: "synthetic",
+          payload: {
+            text: "✅ Connected to Push To Display!",
+            metadata: { source: "pushtodisplay", kind: "login" },
+          },
+          delivery: "steer",
+        },
+      },
+    });
+    expect(alert).toHaveBeenLastCalledWith({
+      title: "Push To Display login",
+      message: "✅ Connected to Push To Display!",
+    });
+
     stop();
   });
 });

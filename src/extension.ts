@@ -552,13 +552,17 @@ export function createSetup(deps: SetupDeps = {}): (ctx: Context) => Promise<Cle
     );
 
     // ---- commands ----------------------------------------------------------
-    async function output(sessionID: SessionID, text: string): Promise<void> {
+    async function output(
+      sessionID: SessionID,
+      text: string,
+      kind?: "login",
+    ): Promise<void> {
       try {
         await ctx.session.synthetic({
           sessionID,
           text,
           resume: false,
-          metadata: { source: "pushtodisplay" },
+          metadata: { source: "pushtodisplay", ...(kind ? { kind } : {}) },
         });
       } catch (err) {
         console.error("[pushtodisplay] could not write command output:", (err as Error)?.message ?? err);
@@ -578,7 +582,7 @@ export function createSetup(deps: SetupDeps = {}): (ctx: Context) => Promise<Cle
 
     function startLogin(sessionID: SessionID): void {
       if (loginProc) {
-        void output(sessionID, "Push To Display login already in progress.");
+        void output(sessionID, "Push To Display login already in progress.", "login");
         return;
       }
       void output(sessionID, "Starting Push To Display OAuth login…");
@@ -590,6 +594,7 @@ export function createSetup(deps: SetupDeps = {}): (ctx: Context) => Promise<Cle
         void output(
           sessionID,
           isCliMissing(err) ? cliNotFoundMessage() : `Could not start login: ${(err as Error)?.message ?? err}`,
+          "login",
         );
         return;
       }
@@ -621,7 +626,7 @@ export function createSetup(deps: SetupDeps = {}): (ctx: Context) => Promise<Cle
         // them together instead of replacing one toast with another.
         if (url && code && !announced) {
           announced = true;
-          void output(sessionID, `Open ${url} in a browser — code: ${code}`);
+          void output(sessionID, `Open ${url} in a browser — code: ${code}`, "login");
         }
       };
 
@@ -635,6 +640,7 @@ export function createSetup(deps: SetupDeps = {}): (ctx: Context) => Promise<Cle
         void output(
           sessionID,
           isCliMissing(err) ? cliNotFoundMessage() : `Login failed to start: ${err.message}`,
+          "login",
         );
       });
 
@@ -644,9 +650,9 @@ export function createSetup(deps: SetupDeps = {}): (ctx: Context) => Promise<Cle
           void gate.start().then((ok) => {
             if (ok) authLostNotified = false;
           });
-          void output(sessionID, "✅ Connected to Push To Display!");
+          void output(sessionID, "✅ Connected to Push To Display!", "login");
         } else {
-          void output(sessionID, `Login failed or was cancelled (exit ${code ?? "?"}).`);
+          void output(sessionID, `Login failed or was cancelled (exit ${code ?? "?"}).`, "login");
         }
       });
     }
@@ -696,7 +702,8 @@ export function createSetup(deps: SetupDeps = {}): (ctx: Context) => Promise<Cle
             await output(sessionID, "Test update sent");
           } catch (err) {
             handleSendError(err);
-            await output(sessionID, "Test update failed — see log");
+            const detail = (err as Error)?.message ?? String(err);
+            await output(sessionID, `Test update failed: ${detail}`);
           }
         },
       });

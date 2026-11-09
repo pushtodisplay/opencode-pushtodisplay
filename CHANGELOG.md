@@ -5,6 +5,20 @@ All notable changes to **opencode-pushtodisplay** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.6] - 2026-11-09
+
+### Fixed
+
+- Login success and failure now replace the login dialog, so approval in the
+  browser produces visible feedback even if the original dialog is still open.
+- `/pushtodisplay-test` shows the underlying CLI error instead of only
+  “Test update failed — see log”.
+
+### Documentation
+
+- Documented the OpenCode server log path and how to include plugin stderr with
+  `--print-logs`.
+
 ## [0.1.5] - 2026-11-09
 
 ### Fixed

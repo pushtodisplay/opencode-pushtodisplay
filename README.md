@@ -299,7 +299,8 @@ If none of those work, the error is surfaced as a "CLI not found" diagnostic.
 | Nothing appears on the board | Run `/pushtodisplay-test`; check `PUSHTODISPLAY_BOARD_ID`, `PUSHTODISPLAY_PANEL`, and the agent label. |
 | Only milestones, no tool lines | `PUSHTODISPLAY_STEPS=0` or `"steps": false` is set. |
 | Plugin does nothing | `PUSHTODISPLAY_DISABLED=1` or `"disabled": true` is set. |
-| Login URL/code never appears | The CLI writes device-code instructions to stderr; the plugin relays both streams. Check the OpenCode server log for `[pushtodisplay]` messages. |
+| Login URL/code never appears | The CLI writes device-code instructions to stderr; the plugin shows both in a login dialog. Check the OpenCode server log for `[pushtodisplay]` messages. |
+| `/pushtodisplay-test` fails | The toast includes the CLI error. Full server log: `~/.local/share/opencode/log/opencode.log`; run OpenCode with `--print-logs` to include plugin `[pushtodisplay]` stderr. |
 | Board lines lag behind the agent | Sends are rate-limited to ~1 msg/s; the sender drops the oldest steps when the backlog is too long. Results and milestones are never dropped. |
 | Lines show `FAIL` but the run finished | Check whether the provider actually failed; `FAIL` is only written from a failed tool or `session.execution.failed`. A user interrupt is `STOP`. |
 
