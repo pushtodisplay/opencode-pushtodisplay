@@ -18,7 +18,10 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          # Match the release workflow. npm 11 (Node 24) handles the
+          # pushtodisplay shrinkwrap's optional esbuild platform packages;
+          # npm 10 on Node 22 fails npm ci with EBADPLATFORM.
+          node-version: "24"
           cache: npm
 
       - name: Install dependencies
