@@ -183,6 +183,14 @@ jobs:
       - name: Verify publish
         if: ${{ inputs.dry_run == false }}
         run: |
-          echo "Waiting for npm registry propagation..."
-          sleep 10
-          npm view "opencode-pushtodisplay@${{ steps.version.outputs.version }}" version
+          echo "Waiting for npm registry propagation (up to 5 minutes)..."
+          for _ in $(seq 1 30); do
+            if npm view "opencode-pushtodisplay@${{ steps.version.outputs.version }}" version; then
+              npm view opencode-pushtodisplay dist-tags --json
+              echo "opencode-pushtodisplay@${{ steps.version.outputs.version }} is live"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Published version not visible in the registry yet; check npm again." >&2
+          exit 1
