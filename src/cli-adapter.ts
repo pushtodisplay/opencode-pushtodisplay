@@ -1,5 +1,5 @@
 /**
- * Adapter for the `pushtodisplay` CLI (`npm i pushtodisplay`).
+ * Adapter for the `pushtodisplay` CLI.
  *
  * The CLI implements the OAuth 2.0 device-code flow against
  * https://idp.pushtodisplay.com. It stores credentials in the OS keychain
@@ -7,10 +7,12 @@
  * to ~/.config/pushtodisplay/credentials.json only when no keychain is
  * available, auto-refreshing the access token.
  *
- * Binary resolution, in order:
- *   1. the `pushtodisplay` npm dependency installed next to this package
- *      (self-contained installs via `plugins`),
- *   2. a global `pushtodisplay` binary on PATH (manual setups).
+ * Binary resolution is an internal detail. In order:
+ *   1. the vendored, pinned CLI shipped inside this package
+ *      (`vendor/pushtodisplay`),
+ *   2. a `pushtodisplay` npm dependency installed next to this package (used
+ *      by development checkouts before the vendor copy exists),
+ *   3. a `pushtodisplay` binary on PATH (advanced/manual environments).
  *
  * OpenCode 2.2 runs plugins inside its own Bun-compiled server. In that runtime
  * `process.execPath` is the OpenCode executable, not Node, so a bundled bin is
@@ -28,13 +30,19 @@ import type { Payload } from "./payloads.ts";
 
 const execFileAsync = promisify(execFile);
 
+/**
+ * The CLI release vendored in `vendor/pushtodisplay`. Keep in sync with the
+ * vendored package.json.
+ */
+export const PUSHTODISPLAY_CLI_VERSION = "0.1.19";
+
 export interface CliCommand {
   /** Executable to spawn (either the bare CLI name or an absolute runtime path). */
   exe: string;
   /** Extra argv to pass before the CLI's own args. */
   prefix: string[];
   /** Where the command came from — used for diagnostics. */
-  source: "npm-dep" | "path";
+  source: "bundled" | "path";
 }
 
 /** Resolve a bare package id to an absolute path (e.g. via `require.resolve`). */
@@ -44,12 +52,12 @@ let resolver: ModuleResolver | null = null;
 let cachedCommand: CliCommand | null = null;
 
 /**
- * Point the adapter at the installed `pushtodisplay` npm dependency.
+ * Point the adapter at the bundled `pushtodisplay` package.
  *
- * Called once from the plugin entry (`src/index.ts`) with a `createRequire`
- * bound to the plugin file, so `require.resolve` finds the package's own
- * node_modules. Optional — when unset (or failing) the adapter falls back to
- * a `pushtodisplay` binary on PATH.
+ * Called once from the plugin entry (`src/index.ts`) with a resolver bound to
+ * the plugin file, so it finds the vendored release (or a development npm
+ * dependency). Optional — when unset (or failing) the adapter falls back to a
+ * `pushtodisplay` binary on PATH.
  */
 export function configureCliResolver(fn: ModuleResolver | null): void {
   resolver = fn;
@@ -145,7 +153,7 @@ export function resolveCli(): CliCommand {
   if (cachedCommand) return cachedCommand;
   const bin = packageBinPath();
   if (bin) {
-    cachedCommand = { ...invocationFor(bin), source: "npm-dep" };
+    cachedCommand = { ...invocationFor(bin), source: "bundled" };
   } else {
     cachedCommand = { exe: "pushtodisplay", prefix: [], source: "path" };
   }
@@ -240,8 +248,7 @@ export function isCliMissing(err: unknown): boolean {
 /** Human-readable install hint shown when the CLI cannot be found at all. */
 export function cliNotFoundMessage(): string {
   return [
-    "Push To Display CLI not found.",
-    "Install it with: npm i -g pushtodisplay",
-    "(When installed as a plugin dependency, the CLI is included automatically.)",
+    "Push To Display CLI not found — the plugin install looks incomplete.",
+    "Reinstall opencode-pushtodisplay, then run /pushtodisplay-setup.",
   ].join(" ");
 }

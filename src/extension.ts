@@ -28,8 +28,9 @@
  * fallback at ~/.config/pushtodisplay/credentials.json only when no keychain
  * is available; the access token refreshes automatically.
  *
- *   /pushtodisplay-login    start the OAuth login from inside OpenCode
- *   /pushtodisplay-status   show current auth state
+ *   /pushtodisplay-setup    log in if needed, send a test entry, enable updates
+ *   /pushtodisplay-login    re-authenticate without clearing an existing setup
+ *   /pushtodisplay-status   show current auth and setup state
  *   /pushtodisplay-test     send a test entry to the board (verify wiring)
  *   /pushtodisplay-clear    write a `log cleared` entry to this panel
  *
@@ -39,6 +40,11 @@
  *   PUSHTODISPLAY_LABEL         agent name shown on every line (default: session title, then folder)
  *   PUSHTODISPLAY_STEPS         Set to "0" to skip per-tool entries
  *   PUSHTODISPLAY_DISABLED      Set to "1" to disable entirely.
+ *
+ * Setup gating: a shared login is not enough. Updates are sent only when this
+ * OpenCode integration has its own setup marker *and* auth is valid. The marker
+ * is written by `/pushtodisplay-setup` after a successful test entry; a fresh
+ * install that reuses another integration's login stays silent until then.
  *
  * Auth gating: an unknown auth state *waits* for the probe rather than dropping
  * the message; a known-bad state drops, and re-probes lazily on the next send
@@ -103,10 +109,12 @@ import {
   cliNotFoundMessage,
   isAuthFailure,
   isCliMissing,
+  PUSHTODISPLAY_CLI_VERSION,
   resolveCli,
   sendPayload,
   spawnCli,
 } from "./cli-adapter.ts";
+import { isSetupComplete, markSetupComplete } from "./setup-state.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -177,13 +185,15 @@ export function createSetup(deps: SetupDeps = {}): (ctx: Context) => Promise<Cle
   const now = deps.clock ?? clock;
 
   return async function setup(ctx: Context): Promise<Cleanup | void> {
-    const conf = loadConfig(deps.env ?? process.env, ctx.options as ConfigOptions);
+    const env = deps.env ?? process.env;
+    const conf = loadConfig(env, ctx.options as ConfigOptions);
     if (conf.disabled) return;
 
     const states = new Map<string, SessionState>();
     const inflight = new Map<string, Promise<SessionState>>();
     const registrations: Registration[] = [];
     let authLostNotified = false;
+    let setupMissingNotified = false;
     let cliMissingNotified = false;
     let loginProc: ChildProcess | null = null;
 
@@ -202,7 +212,15 @@ export function createSetup(deps: SetupDeps = {}): (ctx: Context) => Promise<Cle
       if (authLostNotified) return;
       authLostNotified = true;
       console.warn(
-        "[pushtodisplay] Push To Display not authenticated — updates paused. Run /pushtodisplay-login",
+        "[pushtodisplay] Push To Display not authenticated — updates paused. Run /pushtodisplay-setup",
+      );
+    }
+
+    function notifySetupNeeded() {
+      if (setupMissingNotified) return;
+      setupMissingNotified = true;
+      console.warn(
+        "[pushtodisplay] Push To Display setup has not been completed for OpenCode — updates paused. Run /pushtodisplay-setup",
       );
     }
 
@@ -232,9 +250,15 @@ export function createSetup(deps: SetupDeps = {}): (ctx: Context) => Promise<Cle
     }
 
     // ---- transport ---------------------------------------------------------
-    // Auth is enforced at dispatch time so every entry is gated the same way.
+    // Both gates are enforced at dispatch time so every entry is covered. A
+    // shared credential is not enough: this OpenCode integration must also have
+    // completed its own setup (auth check + successful test entry).
     const sender = new Sender(
       async (payload) => {
+        if (!isSetupComplete(env)) {
+          notifySetupNeeded();
+          return;
+        }
         // Waits for an in-flight probe instead of discarding the message: the
         // first seconds of a session are exactly when a fast turn reports.
         if (!(await gate.allowed())) return;
@@ -580,10 +604,11 @@ export function createSetup(deps: SetupDeps = {}): (ctx: Context) => Promise<Cle
       return s?.agent || defaultAgent();
     }
 
-    function startLogin(sessionID: SessionID): void {
+    /** Start the device-code flow and resolve when it finishes. */
+    function startLogin(sessionID: SessionID): Promise<boolean> {
       if (loginProc) {
         void output(sessionID, "Push To Display login already in progress.", "login");
-        return;
+        return Promise.resolve(false);
       }
       void output(sessionID, "Starting Push To Display OAuth login…");
 
@@ -596,7 +621,7 @@ export function createSetup(deps: SetupDeps = {}): (ctx: Context) => Promise<Cle
           isCliMissing(err) ? cliNotFoundMessage() : `Could not start login: ${(err as Error)?.message ?? err}`,
           "login",
         );
-        return;
+        return Promise.resolve(false);
       }
       loginProc = child;
 
@@ -644,52 +669,163 @@ export function createSetup(deps: SetupDeps = {}): (ctx: Context) => Promise<Cle
       };
 
       child.stdout?.on("data", relay);
-      // The CLI writes the device-code instructions to stderr (0.1.18), so both
-      // streams are relayed; success text arrives on stdout.
+      // The CLI writes the device-code instructions to stderr, so both streams
+      // are relayed; success text arrives on stdout.
       child.stderr?.on("data", relay);
 
-      child.on("error", (err) => {
-        loginProc = null;
-        void output(
-          sessionID,
-          isCliMissing(err) ? cliNotFoundMessage() : `Login failed to start: ${err.message}`,
-          "login",
-        );
-      });
+      return new Promise<boolean>((resolve) => {
+        let settled = false;
+        const finish = (ok: boolean) => {
+          if (settled) return;
+          settled = true;
+          resolve(ok);
+        };
 
-      child.on("exit", (code) => {
-        loginProc = null;
-        if (code === 0) {
-          void gate.start().then((ok) => {
-            if (ok) authLostNotified = false;
-          });
-          void output(sessionID, "✅ Connected to Push To Display!", "login");
-        } else {
-          void output(sessionID, `Login failed or was cancelled (exit ${code ?? "?"}).`, "login");
-        }
+        child.on("error", (err) => {
+          loginProc = null;
+          void output(
+            sessionID,
+            isCliMissing(err) ? cliNotFoundMessage() : `Login failed to start: ${err.message}`,
+            "login",
+          );
+          finish(false);
+        });
+
+        child.on("exit", (code) => {
+          if (settled) return;
+          loginProc = null;
+          if (code === 0) {
+            void gate.start().then((ok) => {
+              if (ok) {
+                authLostNotified = false;
+                void output(
+                  sessionID,
+                  isSetupComplete(env)
+                    ? "✅ Connected to Push To Display!"
+                    : "✅ Connected to Push To Display! Run /pushtodisplay-setup to finish setup.",
+                  "login",
+                );
+              } else {
+                void output(
+                  sessionID,
+                  "Login finished, but Push To Display auth is still unavailable. Run /pushtodisplay-setup to retry.",
+                  "login",
+                );
+              }
+              finish(ok);
+            });
+          } else {
+            void output(sessionID, `Login failed or was cancelled (exit ${code ?? "?"}).`, "login");
+            finish(false);
+          }
+        });
       });
+    }
+
+    /**
+     * Send the setup test entry, then write the per-OpenCode marker. The marker
+     * is written only after both auth and the test send succeeded.
+     */
+    async function finishSetup(sessionID: SessionID): Promise<boolean> {
+      const authed = await gate.recheck();
+      if (!authed) {
+        notifyAuthNeeded();
+        await output(
+          sessionID,
+          "⚠️ Setup stopped — Push To Display is not authenticated. Run /pushtodisplay-setup to retry.",
+        );
+        return false;
+      }
+      authLostNotified = false;
+
+      const agent = await commandLabel(sessionID);
+      try {
+        await sender.flush();
+        await sendPayload(
+          testMessage({ panelId: conf.panel, agent, wall: now() }),
+          conf.boardId,
+        );
+      } catch (err) {
+        handleSendError(err);
+        const detail = (err as Error)?.message ?? String(err);
+        await output(sessionID, `⚠️ Setup stopped — test update failed: ${detail}`);
+        return false;
+      }
+
+      const record = markSetupComplete(
+        {
+          boardId: conf.boardId,
+          panel: conf.panel,
+          label: agent,
+          cliVersion: PUSHTODISPLAY_CLI_VERSION,
+        },
+        env,
+      );
+      setupMissingNotified = false;
+
+      // Lines queued before the marker existed were intentionally dropped.
+      // Let the next event write READY again for sessions that are still open.
+      for (const session of states.values()) {
+        if (!session.ended) session.opened = false;
+      }
+
+      await output(
+        sessionID,
+        `✅ Push To Display setup complete. Test entry sent to panel ${record.panel}${
+          record.boardId ? ` on board ${record.boardId}` : ""
+        }. Updates are now enabled.`,
+      );
+      return true;
+    }
+
+    async function runSetup(sessionID: SessionID): Promise<void> {
+      const authed = await gate.recheck();
+      if (!authed) {
+        await output(sessionID, "Push To Display is not logged in. Starting login…", "login");
+        const ok = await startLogin(sessionID);
+        if (!ok) {
+          await output(
+            sessionID,
+            "⚠️ Setup stopped — login did not complete. Run /pushtodisplay-setup to retry.",
+          );
+          return;
+        }
+      } else {
+        await output(sessionID, "Push To Display is already authenticated. Sending a test entry…");
+      }
+      await finishSetup(sessionID);
     }
 
     const commandRegistration = await ctx.command.transform((editor) => {
       editor.add({
-        name: "pushtodisplay-login",
-        description: "Authenticate OpenCode with Push To Display (OAuth device-code flow)",
+        name: "pushtodisplay-setup",
+        description:
+          "Set up Push To Display for OpenCode: log in if needed, send a test entry, and enable updates",
         execute: async ({ sessionID }) => {
-          startLogin(sessionID);
+          await runSetup(sessionID);
+        },
+      });
+
+      editor.add({
+        name: "pushtodisplay-login",
+        description: "Re-authenticate with Push To Display (OAuth device-code flow)",
+        execute: async ({ sessionID }) => {
+          void startLogin(sessionID);
         },
       });
 
       editor.add({
         name: "pushtodisplay-status",
-        description: "Show Push To Display authentication status",
+        description: "Show Push To Display authentication and setup status",
         execute: async ({ sessionID }) => {
           const authed = await gate.recheck();
-          await output(
-            sessionID,
-            authed
-              ? "✅ Push To Display authenticated"
-              : "⚠️ Push To Display not authenticated — run /pushtodisplay-login",
-          );
+          const setup = isSetupComplete(env);
+          const text = authed
+            ? setup
+              ? "✅ Push To Display authenticated and set up"
+              : "⚠️ Push To Display authenticated, but OpenCode setup is incomplete — run /pushtodisplay-setup"
+            : "⚠️ Push To Display not authenticated — run /pushtodisplay-setup";
+          await output(sessionID, text);
         },
       });
 
@@ -700,9 +836,10 @@ export function createSetup(deps: SetupDeps = {}): (ctx: Context) => Promise<Cle
           // Probe on demand: right after a reload the cached flag is still
           // false while the startup probe is in flight.
           if (!(await gate.allowed())) {
-            await output(sessionID, "⚠️ Not authenticated — run /pushtodisplay-login first");
+            await output(sessionID, "⚠️ Not authenticated — run /pushtodisplay-setup first");
             return;
           }
+          const setup = isSetupComplete(env);
           const agent = await commandLabel(sessionID);
           try {
             // Let the session's READY line (and any earlier steps) reach the
@@ -712,7 +849,12 @@ export function createSetup(deps: SetupDeps = {}): (ctx: Context) => Promise<Cle
               testMessage({ panelId: conf.panel, agent, wall: now() }),
               conf.boardId,
             );
-            await output(sessionID, "Test update sent");
+            await output(
+              sessionID,
+              setup
+                ? "Test update sent"
+                : "Test update sent. Run /pushtodisplay-setup to enable automatic updates.",
+            );
           } catch (err) {
             handleSendError(err);
             const detail = (err as Error)?.message ?? String(err);
@@ -725,6 +867,10 @@ export function createSetup(deps: SetupDeps = {}): (ctx: Context) => Promise<Cle
         name: "pushtodisplay-clear",
         description: "Write a `log cleared` entry to this agent's panel",
         execute: async ({ sessionID }) => {
+          if (!isSetupComplete(env)) {
+            await output(sessionID, "⚠️ Setup is incomplete — run /pushtodisplay-setup first");
+            return;
+          }
           const agent = await commandLabel(sessionID);
           sender.enqueue(
             clearedMessage({ panelId: conf.panel, agent, wall: now() }),
@@ -757,8 +903,14 @@ export function createSetup(deps: SetupDeps = {}): (ctx: Context) => Promise<Cle
       }
     })();
 
-    // Probe once at load, then let gating and the login command keep it fresh.
-    void settleAuth();
+    // Probe once at load only when this integration is already set up. A fresh
+    // install may share another integration's login, but it stays silent until
+    // /pushtodisplay-setup has verified auth and sent its test entry.
+    if (isSetupComplete(env)) {
+      void settleAuth();
+    } else {
+      notifySetupNeeded();
+    }
 
     // ---- cleanup -----------------------------------------------------------
     return async () => {

@@ -1,4 +1,5 @@
 import {
+  PUSHTODISPLAY_CLI_VERSION,
   sendArgs,
   sendPayload,
   isAuthFailure,
@@ -13,6 +14,7 @@ import {
 import type { Payload } from "../payloads.ts";
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -137,12 +139,12 @@ describe("sendArgs", () => {
 });
 
 describe("resolveCli", () => {
-  it("uses the bundled npm dependency when a resolver resolves it", () => {
+  it("uses the bundled package when a resolver resolves it", () => {
     const pkgJson = fakePkg({ bin: "./dist/cli.js" });
     try {
       resolveFrom(pkgJson);
       const cmd = resolveCli();
-      expect(cmd.source).toBe("npm-dep");
+      expect(cmd.source).toBe("bundled");
       expect(cmd.exe).toBe(process.execPath);
       expect(cmd.prefix).toEqual([path.join(path.dirname(pkgJson), "dist", "cli.js")]);
     } finally {
@@ -187,6 +189,18 @@ describe("resolveCli", () => {
     const a = resolveCli();
     const b = resolveCli();
     expect(a).toBe(b);
+  });
+});
+
+describe("vendored CLI", () => {
+  it("keeps the vendored release pinned to the adapter constant", () => {
+    const root = path.join(process.cwd(), "vendor", "pushtodisplay");
+    const manifest = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")) as {
+      version: string;
+      bin: { pushtodisplay: string };
+    };
+    expect(manifest.version).toBe(PUSHTODISPLAY_CLI_VERSION);
+    expect(existsSync(path.join(root, manifest.bin.pushtodisplay))).toBe(true);
   });
 });
 

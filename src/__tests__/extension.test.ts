@@ -1,6 +1,11 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type { Plugin } from "@opencode/plugin";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import * as path from "node:path";
+
 import type { Payload } from "../payloads.ts";
+import { isSetupComplete, markSetupComplete } from "../setup-state.ts";
 
 /**
  * The CLI adapter is mocked so these tests exercise the event/command wiring,
@@ -99,14 +104,26 @@ interface Fake {
   infos: Map<string, any>;
   outputs: string[];
   syntheticCalls: Array<{ sessionID: string; text: string; resume?: boolean }>;
+  env: NodeJS.ProcessEnv;
   cleanup: (() => Promise<void> | void) | undefined;
   emit: (event: unknown) => void;
 }
 
+const tempDirs: string[] = [];
+
 async function fake(opts: {
   env?: NodeJS.ProcessEnv;
   options?: Record<string, unknown>;
+  /** Write the per-integration setup marker (default true). */
+  setup?: boolean;
 } = {}): Promise<Fake> {
+  const cacheRoot = mkdtempSync(path.join(tmpdir(), "ptd-ext-"));
+  tempDirs.push(cacheRoot);
+  const env: NodeJS.ProcessEnv = {
+    PUSHTODISPLAY_CACHE_DIR: cacheRoot,
+    ...(opts.env ?? {}),
+  };
+  if (opts.setup !== false) markSetupComplete({ panel: 1 }, env);
   const sessionHooks = new Map<string, (event: any) => unknown>();
   const toolHooks = new Map<string, (event: any) => unknown>();
   const commands = new Map<string, any>();
@@ -189,7 +206,7 @@ async function fake(opts: {
     intervalMs: 0,
     probeIntervalMs: 0,
     clock: () => WALL,
-    env: opts.env ?? {},
+    env,
   });
   const cleanup = await setup(ctx as unknown as Plugin.Context);
 
@@ -200,6 +217,7 @@ async function fake(opts: {
     infos,
     outputs,
     syntheticCalls,
+    env,
     cleanup: typeof cleanup === "function" ? cleanup : undefined,
     emit(event: unknown) {
       queue.push(event);
@@ -249,6 +267,9 @@ beforeEach(() => {
 
 afterEach(() => {
   jest.restoreAllMocks();
+  for (const dir of tempDirs.splice(0)) {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 describe("event wiring", () => {
@@ -460,12 +481,86 @@ describe("event wiring", () => {
   });
 });
 
+describe("setup gating", () => {
+  it("sends nothing with valid auth but no setup marker", async () => {
+    const f = await fake({ setup: false });
+    f.emit(created("s1", "release"));
+    await f.sessionHooks.get("prompt")!(prompt("s1", "fix the flaky test"));
+    await delay(50);
+    expect(mock.auth).toBe(true);
+    expect(mock.sent).toHaveLength(0);
+    expect(isSetupComplete(f.env)).toBe(false);
+    await f.cleanup?.();
+  });
+
+  it("sends with both the marker and valid auth", async () => {
+    const f = await fake({ setup: true });
+    f.emit(created("s1", "release"));
+    await waitFor(() => lines().length >= 1);
+    expect(isSetupComplete(f.env)).toBe(true);
+    expect(lines()).toEqual(["release session opened READY 11:04"]);
+    await f.cleanup?.();
+  });
+
+  it("drops updates with the marker but invalid auth", async () => {
+    mock.auth = false;
+    const f = await fake({ setup: true });
+    f.emit(created("s1", "release"));
+    await waitFor(() => mock.authCalls >= 1);
+    await delay(50);
+    expect(isSetupComplete(f.env)).toBe(true);
+    expect(mock.sent).toHaveLength(0);
+    await f.cleanup?.();
+  });
+
+  it("setup logs in, sends a test entry, and writes the marker", async () => {
+    mock.auth = false;
+    const f = await fake({ setup: false });
+    const running = f.commands.get("pushtodisplay-setup")!.execute({
+      sessionID: "s1",
+      prompt: { text: "" },
+      delivery: "steer",
+    });
+    await waitFor(() => mock.spawnCli.mock.calls.length === 1);
+    expect(isSetupComplete(f.env)).toBe(false);
+
+    mock.auth = true;
+    const child = mock.spawnCli.mock.results.at(-1)!.value as any;
+    child.emit("exit", 0);
+    await running;
+
+    expect(isSetupComplete(f.env)).toBe(true);
+    await waitFor(() => lines().some((l) => l.includes("link OK")));
+    expect(f.outputs.some((t) => t.includes("setup complete"))).toBe(true);
+    await f.cleanup?.();
+  });
+
+  it("setup reuses valid auth, sends the test, and enables updates", async () => {
+    const f = await fake({ setup: false });
+    expect(isSetupComplete(f.env)).toBe(false);
+    await f.commands.get("pushtodisplay-setup")!.execute({
+      sessionID: "s1",
+      prompt: { text: "" },
+      delivery: "steer",
+    });
+    expect(isSetupComplete(f.env)).toBe(true);
+    await waitFor(() => lines().some((l) => l.includes("link OK")));
+
+    // A session opened before setup had its READY line dropped; the next event
+    // starts the board log with READY instead of beginning mid-session.
+    f.emit(created("s2", "release"));
+    await waitFor(() => lines().some((l) => l.includes("session opened")));
+    await f.cleanup?.();
+  });
+});
+
 describe("commands", () => {
   it("registers every documented command", async () => {
     const f = await fake();
     expect([...f.commands.keys()].sort()).toEqual([
       "pushtodisplay-clear",
       "pushtodisplay-login",
+      "pushtodisplay-setup",
       "pushtodisplay-status",
       "pushtodisplay-test",
     ]);
@@ -580,6 +675,34 @@ describe("commands", () => {
     child.emit("exit", 0);
     await waitFor(() => f.outputs.some((t) => t.includes("Connected")));
     expect(mock.authCalls).toBeGreaterThanOrEqual(2);
+    expect(isSetupComplete(f.env)).toBe(true);
+    await f.cleanup?.();
+  });
+
+  it("re-authentication does not clear an existing setup marker", async () => {
+    const f = await fake({ setup: true });
+    expect(isSetupComplete(f.env)).toBe(true);
+    await f.commands.get("pushtodisplay-login")!.execute({
+      sessionID: "s1",
+      prompt: { text: "" },
+      delivery: "steer",
+    });
+    const child = mock.spawnCli.mock.results.at(-1)!.value as any;
+    child.emit("exit", 0);
+    await waitFor(() => f.outputs.some((t) => t.includes("Connected")));
+    expect(isSetupComplete(f.env)).toBe(true);
+    await f.cleanup?.();
+  });
+
+  it("status explains an authenticated but unset integration", async () => {
+    const f = await fake({ setup: false });
+    await f.commands.get("pushtodisplay-status")!.execute({
+      sessionID: "s1",
+      prompt: { text: "" },
+      delivery: "steer",
+    });
+    expect(f.outputs.at(-1)).toContain("setup is incomplete");
+    expect(f.outputs.at(-1)).toContain("/pushtodisplay-setup");
     await f.cleanup?.();
   });
 });

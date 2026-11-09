@@ -81,6 +81,9 @@ out
 # Nuxt.js build / generate output
 .nuxt
 dist
+# The vendored pushtodisplay CLI is a committed runtime artifact.
+!vendor/pushtodisplay/dist/
+!vendor/pushtodisplay/dist/**
 .output
 
 # Gatsby files

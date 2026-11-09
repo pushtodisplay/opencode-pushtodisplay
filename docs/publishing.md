@@ -109,15 +109,18 @@ Never commit an npm token or put one in `opencode.json`.
 
 ## Package contents
 
-`package.json` publishes only:
+`package.json` publishes:
 
 - `src/*.ts` (runtime entry and its imports)
+- `vendor/pushtodisplay/**` (the pinned, vendored CLI)
+- `docs/*.md` (maintainer and publishing notes)
 - `README.md`
 - `CHANGELOG.md`
 - `LICENSE`
 
 Tests under `src/__tests__/` and development configuration are excluded. Check
-with `npm pack --dry-run` before every release.
+with `npm pack --dry-run` before every release. The vendored release is pinned;
+do not copy the upstream `npm-shrinkwrap.json` into the package.
 
 ## Trusted Publishing notes
 

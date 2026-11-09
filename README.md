@@ -5,40 +5,14 @@ agent's activity onto your Push To Display board in real time.
 
 ## Install
 
-Requires **OpenCode V2.2+**. Install the published npm package:
+Requires **OpenCode V2.2+**. Install the published npm package once:
 
 ```bash
 opencode plugin add opencode-pushtodisplay@latest
 ```
 
-That adds the plugin to your global `opencode.json(c)`. To configure it per
-project, add the same entry yourself:
-
-```jsonc
-{
-  "$schema": "https://opencode.ai/config.json",
-  "plugins": ["opencode-pushtodisplay"]
-}
-```
-
-From a local checkout or a git checkout:
-
-```jsonc
-{
-  "plugins": [
-    {
-      "package": "/absolute/path/to/opencode-pushtodisplay",
-      "options": {
-        "panel": 1,
-        "label": "release"
-      }
-    }
-  ]
-}
-```
-
-The object form is also where per-project options go. One entry loads the plugin;
-OpenCode discovers the server part through the package's `exports` field.
+That adds the plugin to your global `opencode.json(c)`. The plugin includes the
+Push To Display CLI it needs; there is no separate CLI or global npm install.
 
 > **Security:** plugins run with the OpenCode server's full system access. Review
 > the source before installing third-party plugins.
@@ -130,12 +104,13 @@ parent's name, because a human must act on it.
 - **Quota-friendly** — every API call counts toward your message quota (Sandbox
   tiers are rate-limited to ~1 msg/s). Sends are spaced ≥ 1.2 s, consecutive
   identical lines are skipped per agent, and nothing streams token by token.
+- **Explicit setup** — a shared login is not enough. A fresh install stays
+  silent until `/pushtodisplay-setup` verifies auth and sends a test entry.
 - **Auth gating** — updates wait for the first auth probe, then are dropped
   (never buffered) while auth is known to be bad; sending resumes automatically
   once you log in.
-- **Self-contained install** — bundles the `pushtodisplay` CLI as a dependency,
-  so a plugin install works without a global CLI. Falls back to a `pushtodisplay`
-  binary on PATH.
+- **Self-contained install** — ships the pinned Push To Display CLI inside the
+  plugin, so one npm install is all you need.
 
 ## Requirements
 
@@ -144,29 +119,29 @@ parent's name, because a human must act on it.
   loads the plugin's TypeScript entry directly; there is no build step.
 - A Push To Display account and board.
 
-## Quick start
+## Setup
 
-1. **Log in** (opens your browser, OAuth device-code flow):
+After installing, run the one setup action:
 
-   ```
-   /pushtodisplay-login
-   ```
+```
+/pushtodisplay-setup
+```
 
-   The command relays the URL and code into the session, opens the browser when
-   possible, and re-probes auth when the CLI reports success.
+It logs in with the OAuth device-code flow if needed, sends one test entry to
+your configured panel and board, and only then enables automatic updates. If you
+already logged in through another integration on this machine, setup reuses that
+login but still sends the OpenCode test entry and marks this installation as set
+up.
 
-2. **Verify the wiring** — sends a test entry to your configured panel and board
-   (panel 1 / the default board unless overridden):
+The board should show `<label> link OK, panel N OK HH:MM`. Check the current
+state at any time with:
 
-   ```
-   /pushtodisplay-test
-   ```
+```
+/pushtodisplay-status
+```
 
-3. **Check auth state**:
-
-   ```
-   /pushtodisplay-status
-   ```
+Use `/pushtodisplay-login` only when you need to re-authenticate; it does not
+clear an existing setup marker.
 
 That's it — the next time you run an agent, your board shows it starting, what
 it's working on, errors, and when it ends.
@@ -233,8 +208,9 @@ release running npm test OK 11:40
 
 | Command | Description |
 | --- | --- |
-| `/pushtodisplay-login` | Start OAuth login (opens browser, shows code). |
-| `/pushtodisplay-status` | Show current auth state. |
+| `/pushtodisplay-setup` | Log in if needed, send a test entry, and enable updates for this OpenCode install. |
+| `/pushtodisplay-login` | Re-authenticate (OAuth device-code flow) without clearing setup. |
+| `/pushtodisplay-status` | Show current auth and setup state. |
 | `/pushtodisplay-test` | Send a test update to verify wiring. |
 | `/pushtodisplay-clear` | Write a `log cleared` entry to this panel. |
 
@@ -269,34 +245,27 @@ OpenCode events ──► state ──► message builder ──► sender ─�
   consecutive duplicates, trims the oldest steps when the backlog would
   otherwise run too far behind, and spaces sends ≥ 1.2 s apart — safely above
   the Sandbox ~1 msg/s cap.
+- **Setup gating:** updates are sent only when this OpenCode integration has a
+  setup marker and auth is valid. The marker is written by
+  `/pushtodisplay-setup` after its test entry succeeds, so a shared credential
+  from another integration cannot make a fresh install start posting.
 - **Auth gating:** auth is probed at plugin load and re-probed lazily on send at
   most once every 20 s while unauthenticated (`/pushtodisplay-status` forces a
   check). Once auth is known to be bad, updates are dropped, never buffered;
-  `/pushtodisplay-login` re-probes and re-enables sending. Gating happens at
-  dispatch time, so every path is covered.
+  `/pushtodisplay-setup` or `/pushtodisplay-login` re-probes and re-enables
+  sending. Gating happens at dispatch time, so every path is covered.
 - **Cleanup:** when the plugin unloads (including server shutdown), it flushes
   the sender and writes `ENDED` for every session it opened.
-
-### CLI resolution
-
-The plugin bundles `pushtodisplay` as a dependency and resolves its bin through
-the plugin package's own `node_modules`, then falls back to a `pushtodisplay`
-binary on PATH.
-
-OpenCode 2.2 runs plugins inside a Bun-compiled server, so `process.execPath` is
-the OpenCode executable, not Node. In that runtime the bundled bin is spawned
-directly and its `#!/usr/bin/env node` shebang selects Node. If the bin is not
-executable, the plugin uses a `node` found on PATH as a fallback; on Windows it
-uses `node.exe` directly because a `.js` file cannot be executed by the shell.
-If none of those work, the error is surfaced as a "CLI not found" diagnostic.
 
 ## Troubleshooting
 
 | Symptom | What to check |
 | --- | --- |
-| `Push To Display CLI not found` | Reinstall the plugin so its `pushtodisplay` dependency is present, or `npm i -g pushtodisplay`. |
-| Updates paused / not authenticated | Run `/pushtodisplay-login`, then `/pushtodisplay-status`. |
-| Nothing appears on the board | Run `/pushtodisplay-test`; check `PUSHTODISPLAY_BOARD_ID`, `PUSHTODISPLAY_PANEL`, and the agent label. |
+| `Push To Display CLI not found` | The plugin install looks incomplete — reinstall `opencode-pushtodisplay`, then run `/pushtodisplay-setup`. |
+| Nothing appears after installing | Run `/pushtodisplay-setup`; a fresh install stays silent until the marker and auth both exist. |
+| Authenticated but still silent | Run `/pushtodisplay-setup` to finish this OpenCode install, then `/pushtodisplay-status`. |
+| Updates paused / not authenticated | Run `/pushtodisplay-setup`, then `/pushtodisplay-status`. |
+| Test entry does not appear | Run `/pushtodisplay-setup` or `/pushtodisplay-test`; check `PUSHTODISPLAY_BOARD_ID`, `PUSHTODISPLAY_PANEL`, and the agent label. |
 | Only milestones, no tool lines | `PUSHTODISPLAY_STEPS=0` or `"steps": false` is set. |
 | Plugin does nothing | `PUSHTODISPLAY_DISABLED=1` or `"disabled": true` is set. |
 | Login URL/code never appears | The CLI writes device-code instructions to stderr; the plugin shows both in a login dialog. Check the OpenCode server log for `[pushtodisplay]` messages. |
@@ -320,29 +289,17 @@ PATH that records argv to a file; no live OAuth or network call is made.
 Extension tests use a fake OpenCode context and a mocked CLI adapter to exercise
 the event, hook, command, and cleanup wiring.
 
-Release steps, Trusted Publishing setup, and the first-publish path are in
+Local-checkout install, bundled CLI resolution, the live smoke test, and release
+steps are in [docs/maintainers.md](docs/maintainers.md) and
 [docs/publishing.md](docs/publishing.md).
-
-### Live smoke test
-
-For a manual end-to-end check, point the CLI at a local mock API:
-
-```bash
-PTD_API_URL=http://127.0.0.1:45123 PTD_ACCESS_TOKEN=dummy \
-  opencode serve --port 45125
-```
-
-Then create a session and prompt it through the OpenCode API. The plugin posts
-`READY`, `RUN`, `OK`/`FAIL`, `NEEDS`, `DONE`, `STOP`, and `ENDED` lines to the
-mock endpoint. This is how the event names and payload shapes were verified
-against OpenCode 2.2.6.
 
 ## Architecture
 
 | File | Responsibility |
 | --- | --- |
 | `src/index.ts` | Package entry — resolves the bundled CLI and exports `Plugin.define(...)`. The only file using `import.meta`. |
-| `src/extension.ts` | The setup factory: OpenCode event/hook/command wiring, auth gating, send scheduling, cleanup. |
+| `src/extension.ts` | The setup factory: OpenCode event/hook/command wiring, setup/auth gating, send scheduling, cleanup. |
+| `src/setup-state.ts` | Per-OpenCode setup marker: cache path, read gate, atomic write. |
 | `src/config.ts` | Env-var and plugin-option config parsing + string helpers (`truncate`, `clock`). |
 | `src/panel-state.ts` | The task/closing text a message needs; no counters, no verdict. |
 | `src/messages.ts` | One-sentence message builders — the whole visible vocabulary. |
@@ -350,7 +307,7 @@ against OpenCode 2.2.6.
 | `src/sender.ts` | The queue: order, dedupe, bounded backlog, 1.2 s spacing. |
 | `src/payloads.ts` | Wire types and the palette. |
 | `src/auth-gate.ts` | Unknown / logged in / logged out; unknown waits for the probe, known-bad drops. |
-| `src/cli-adapter.ts` | CLI binary resolution, argv mapping, auth probing, error classification. |
+| `src/cli-adapter.ts` | Bundled CLI resolution, argv mapping, auth probing, error classification. |
 | `src/describe.ts` | Human-readable present-tense one-liners for OpenCode tool calls. |
 
 ## License

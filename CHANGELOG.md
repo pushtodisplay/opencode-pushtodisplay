@@ -5,6 +5,34 @@ All notable changes to **opencode-pushtodisplay** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.8] - 2026-11-09
+
+### Added
+
+- Per-integration setup marker at
+  `<cache>/pushtodisplay/opencode/setup.json`. Updates are sent only when the
+  marker exists and auth is valid, so a fresh install that reuses another
+  integration's shared credential stays silent until this OpenCode install is
+  set up.
+- `/pushtodisplay-setup`, which logs in if needed, sends a test entry, and writes
+  the marker only after both auth and the test send succeed.
+- Tests for setup gating, the setup flow, re-authentication, and cache isolation.
+
+### Changed
+
+- `/pushtodisplay-status` now reports both auth and setup state.
+- `/pushtodisplay-login` is the re-authentication path and no longer implies that
+  setup is complete; it does not clear an existing marker.
+- User documentation now documents one install path and one setup action. Local
+  checkout, bundled CLI resolution, and live smoke-test notes moved to
+  `docs/maintainers.md`.
+
+### Fixed
+
+- The plugin now ships the pinned `pushtodisplay` CLI 0.1.19 under
+  `vendor/pushtodisplay` instead of depending on a caret range. This removes the
+  upstream shrinkwrap from `npm ci` and makes plugin installs reproducible.
+
 ## [0.1.7] - 2026-11-09
 
 ### Changed

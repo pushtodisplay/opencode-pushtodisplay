@@ -1,6 +1,6 @@
 {
   "name": "opencode-pushtodisplay",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "Mirror OpenCode agent activity onto your Push To Display board as a shared, human-readable log (lifecycle, tasks, tool steps, alerts, errors)",
   "type": "module",
   "keywords": [
@@ -38,6 +38,8 @@
   },
   "files": [
     "src/*.ts",
+    "vendor/pushtodisplay/**",
+    "docs/*.md",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"
@@ -51,8 +53,7 @@
     "prepublishOnly": "npm run check"
   },
   "dependencies": {
-    "@opencode/plugin": "^2.2.6",
-    "pushtodisplay": "^0.1.18"
+    "@opencode/plugin": "^2.2.6"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",

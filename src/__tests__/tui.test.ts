@@ -8,7 +8,7 @@ describe("TUI part", () => {
 
   it("maps command output to toast variants", () => {
     expect(toastVariant("✅ Push To Display authenticated")).toBe("success");
-    expect(toastVariant("⚠️ Not authenticated — run /pushtodisplay-login first")).toBe("warning");
+    expect(toastVariant("⚠️ Not authenticated — run /pushtodisplay-setup first")).toBe("warning");
     expect(toastVariant("Test update failed — see log")).toBe("error");
     expect(toastVariant("Starting Push To Display OAuth login…")).toBe("info");
   });
