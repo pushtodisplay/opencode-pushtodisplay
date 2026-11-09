@@ -147,7 +147,7 @@ jobs:
           echo "Will publish opencode-pushtodisplay@${NEW_VERSION} with tag: ${DIST_TAG}"
 
       - name: Set version in package.json
-        run: npm version "${{ steps.version.outputs.version }}" --no-git-tag-version
+        run: npm version "${{ steps.version.outputs.version }}" --no-git-tag-version --allow-same-version
 
       - name: Verify package contents
         run: npm pack --dry-run
