@@ -1,0 +1,188 @@
+name: opencode-pushtodisplay Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: "Release type"
+        required: true
+        type: choice
+        options:
+          - alpha
+          - beta
+          - rc
+          - stable
+      version_bump:
+        description: "Version bump (none publishes the current package.json version)"
+        required: false
+        type: choice
+        default: patch
+        options:
+          - patch
+          - minor
+          - major
+          - none
+      npm_tag:
+        description: "Override npm dist-tag (leave empty for default: stable->latest, pre-release->release_type)"
+        required: false
+        type: string
+        default: ""
+      version_override:
+        description: "Exact version to publish (leave empty to bump package.json)"
+        required: false
+        type: string
+        default: ""
+      dry_run:
+        description: "Dry run (skip actual publish)"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  id-token: write
+
+concurrency:
+  group: opencode-pushtodisplay-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish opencode-pushtodisplay
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Check npm token
+        id: npm
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -n "${NPM_TOKEN:-}" ]; then
+            echo "has_token=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_token=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check (typecheck + lint + tests)
+        run: npm run check
+
+      - name: Determine version
+        id: version
+        shell: bash
+        run: |
+          CURRENT=$(node -p "require('./package.json').version")
+          BASE=$(echo "$CURRENT" | sed 's/-.*//')
+          OVERRIDE="${{ inputs.version_override }}"
+
+          if [[ -n "$OVERRIDE" ]]; then
+            if [[ ! "$OVERRIDE" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+              echo "Invalid version override: $OVERRIDE" >&2
+              exit 1
+            fi
+            NEW_VERSION="$OVERRIDE"
+          else
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$BASE"
+            case "${{ inputs.version_bump }}" in
+              major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+              minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+              patch) PATCH=$((PATCH + 1)) ;;
+              none) ;;
+              *) echo "Unknown version bump: ${{ inputs.version_bump }}" >&2; exit 1 ;;
+            esac
+            BUMPED="${MAJOR}.${MINOR}.${PATCH}"
+
+            if [[ "${{ inputs.release_type }}" == "stable" ]]; then
+              NEW_VERSION="$BUMPED"
+            else
+              TAG="${{ inputs.release_type }}"
+              PRE_NUM=$(BUMPED="$BUMPED" RELEASE_TAG="$TAG" node -e '
+                try {
+                  const versions = JSON.parse(require("node:child_process").execSync(
+                    "npm view opencode-pushtodisplay versions --json",
+                    { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }
+                  ).trim() || "[]");
+                  const prefix = process.env.BUMPED + "-" + process.env.RELEASE_TAG + ".";
+                  const max = versions
+                    .filter((v) => v.startsWith(prefix))
+                    .map((v) => parseInt(v.slice(prefix.length), 10))
+                    .filter((n) => !isNaN(n))
+                    .reduce((a, b) => Math.max(a, b), -1);
+                  console.log(max + 1);
+                } catch {
+                  console.log(0);
+                }
+              ')
+              NEW_VERSION="${BUMPED}-${TAG}.${PRE_NUM}"
+            fi
+          fi
+
+          if [[ -n "${{ inputs.npm_tag }}" ]]; then
+            DIST_TAG="${{ inputs.npm_tag }}"
+          elif [[ "${{ inputs.release_type }}" == "stable" ]]; then
+            DIST_TAG="latest"
+          else
+            DIST_TAG="${{ inputs.release_type }}"
+          fi
+
+          echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$DIST_TAG" >> "$GITHUB_OUTPUT"
+          echo "Will publish opencode-pushtodisplay@${NEW_VERSION} with tag: ${DIST_TAG}"
+
+      - name: Set version in package.json
+        run: npm version "${{ steps.version.outputs.version }}" --no-git-tag-version
+
+      - name: Verify package contents
+        run: npm pack --dry-run
+
+      - name: Publish to npm (Trusted Publishing / OIDC)
+        if: ${{ inputs.dry_run == false && steps.npm.outputs.has_token == 'false' }}
+        run: npm publish --provenance --access public --tag "${{ steps.version.outputs.tag }}"
+
+      - name: Publish to npm (NPM_TOKEN fallback)
+        if: ${{ inputs.dry_run == false && steps.npm.outputs.has_token == 'true' }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --provenance --access public --tag "${{ steps.version.outputs.tag }}"
+
+      - name: Dry run publish
+        if: ${{ inputs.dry_run == true }}
+        run: |
+          echo "DRY RUN - would publish:"
+          echo "  Package: opencode-pushtodisplay@${{ steps.version.outputs.version }}"
+          echo "  Tag: ${{ steps.version.outputs.tag }}"
+          npm pack --dry-run
+
+      - name: Commit version & create git tag
+        if: ${{ inputs.dry_run == false }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json
+          git commit -m "chore: release v${{ steps.version.outputs.version }}"
+          git tag "opencode-pushtodisplay-v${{ steps.version.outputs.version }}"
+          git push origin HEAD "opencode-pushtodisplay-v${{ steps.version.outputs.version }}"
+
+      - name: Verify publish
+        if: ${{ inputs.dry_run == false }}
+        run: |
+          echo "Waiting for npm registry propagation..."
+          sleep 10
+          npm view "opencode-pushtodisplay@${{ steps.version.outputs.version }}" version

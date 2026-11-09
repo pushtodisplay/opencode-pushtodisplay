@@ -3,6 +3,46 @@
 **Push To Display** plugin for [OpenCode](https://opencode.ai) — mirrors your
 agent's activity onto your Push To Display board in real time.
 
+## Install
+
+Requires **OpenCode V2.2+**. Install the published npm package:
+
+```bash
+opencode plugin add opencode-pushtodisplay@latest
+```
+
+That adds the plugin to your global `opencode.json(c)`. To configure it per
+project, add the same entry yourself:
+
+```jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugins": ["opencode-pushtodisplay"]
+}
+```
+
+From a local checkout or a git checkout:
+
+```jsonc
+{
+  "plugins": [
+    {
+      "package": "/absolute/path/to/opencode-pushtodisplay",
+      "options": {
+        "panel": 1,
+        "label": "release"
+      }
+    }
+  ]
+}
+```
+
+The object form is also where per-project options go. One entry loads the plugin;
+OpenCode discovers the server part through the package's `exports` field.
+
+> **Security:** plugins run with the OpenCode server's full system access. Review
+> the source before installing third-party plugins.
+
 A panel is a **shared scrolling log** (1 of 4). Every entry is its own message,
 newest at the top, and every entry has the same shape:
 
@@ -100,42 +140,9 @@ parent's name, because a human must act on it.
 ## Requirements
 
 - **OpenCode V2.2+** with `@opencode/plugin` 2.2.x.
-- Node.js ≥ 18 for the CLI and for development. OpenCode loads the plugin's
-  TypeScript entry directly; there is no build step.
+- Node.js ≥ 18 for the bundled `pushtodisplay` CLI and for development. OpenCode
+  loads the plugin's TypeScript entry directly; there is no build step.
 - A Push To Display account and board.
-
-## Install
-
-Add the plugin to `opencode.json(c)`:
-
-```jsonc
-{
-  "$schema": "https://opencode.ai/config.json",
-  "plugins": ["opencode-pushtodisplay"]
-}
-```
-
-From a local checkout or a git checkout:
-
-```jsonc
-{
-  "plugins": [
-    {
-      "package": "/absolute/path/to/opencode-pushtodisplay",
-      "options": {
-        "panel": 1,
-        "label": "release"
-      }
-    }
-  ]
-}
-```
-
-The object form is also where per-project options go. One entry loads the plugin;
-OpenCode discovers the server part through the package's `exports` field.
-
-> **Security:** plugins run with the OpenCode server's full system access. Review
-> the source before installing third-party plugins.
 
 ## Quick start
 
@@ -311,6 +318,9 @@ Tests that touch the CLI use a fake `pushtodisplay` executable on a temporary
 PATH that records argv to a file; no live OAuth or network call is made.
 Extension tests use a fake OpenCode context and a mocked CLI adapter to exercise
 the event, hook, command, and cleanup wiring.
+
+Release steps, Trusted Publishing setup, and the first-publish path are in
+[docs/publishing.md](docs/publishing.md).
 
 ### Live smoke test
 

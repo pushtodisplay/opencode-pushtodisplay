@@ -36,8 +36,9 @@
     ".": "./src/index.ts"
   },
   "files": [
-    "src",
+    "src/*.ts",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "scripts": {
@@ -49,14 +50,11 @@
     "prepublishOnly": "npm run check"
   },
   "dependencies": {
+    "@opencode/plugin": "^2.2.6",
     "pushtodisplay": "^0.1.18"
-  },
-  "peerDependencies": {
-    "@opencode/plugin": "^2.2.6"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
-    "@opencode/plugin": "2.2.6",
     "@types/jest": "^29.5.14",
     "@types/node": "^22.15.3",
     "eslint": "^9.25.1",
