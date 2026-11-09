@@ -571,12 +571,11 @@ describe("commands", () => {
       ),
     );
     await waitFor(() => f.outputs.some((t) => t.includes("ABCD-1234")));
-    expect(
-      f.outputs.some((t) =>
-        t.includes("https://idp.pushtodisplay.com/device?user_code=ABCD-1234"),
-      ),
-    ).toBe(true);
-    expect(f.outputs.some((t) => t.includes("code: ABCD-1234"))).toBe(true);
+    const loginLine = f.outputs.find((t) =>
+      t.includes("Open https://idp.pushtodisplay.com/device"),
+    );
+    expect(loginLine).toContain("Code: ABCD-1234");
+    expect(loginLine).not.toContain("user_code");
 
     child.emit("exit", 0);
     await waitFor(() => f.outputs.some((t) => t.includes("Connected")));

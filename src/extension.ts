@@ -607,26 +607,39 @@ export function createSetup(deps: SetupDeps = {}): (ctx: Context) => Promise<Cle
       const relay = (chunk: Buffer | string) => {
         out += chunk.toString();
         const urls = out.match(/https?:\/\/[^\s"'<>]+/g) ?? [];
-        // Prefer the "complete" link that already carries the user code; fall
-        // back to the plain verification URL if the CLI only prints that.
-        const url =
-          urls.find((u) => /[?&](user_code|code)=/i.test(u)) ??
-          urls.find((u) => /device|user_code|oauth|authorize/i.test(u)) ??
-          urls[0] ??
-          "";
+        const complete = urls.find((u) => /[?&](user_code|code)=/i.test(u));
+        const plain = urls.find((u) => !/[?&](user_code|code)=/i.test(u));
+        // The "complete" link is convenient for the browser, but it is a bad
+        // thing to paste: the device code ends up inside the URL. Show a clean
+        // URL and keep the code on its own line.
+        let displayUrl = plain ?? complete ?? urls[0] ?? "";
+        if (!plain && complete) {
+          try {
+            const parsed = new URL(complete);
+            parsed.searchParams.delete("user_code");
+            parsed.searchParams.delete("code");
+            displayUrl = parsed.toString();
+          } catch {
+            // Keep the raw URL if it is not a valid URL object.
+          }
+        }
         const code =
           out.match(/\b[A-Z0-9]{4}-[A-Z0-9]{4}\b/)?.[0] ??
           out.match(/(?:code)[:\s]+([A-Z0-9][A-Z0-9-]{3,})/i)?.[1] ??
           "";
-        if (url && !opened) {
+        if ((complete || plain) && !opened) {
           opened = true;
-          void openBrowser(url);
+          void openBrowser(complete ?? plain!);
         }
-        // One message carries both the link and the code so the TUI can show
-        // them together instead of replacing one toast with another.
-        if (url && code && !announced) {
+        // One message carries both the clean link and the code so the TUI can
+        // show them together instead of replacing one toast with another.
+        if (displayUrl && code && !announced) {
           announced = true;
-          void output(sessionID, `Open ${url} in a browser — code: ${code}`, "login");
+          void output(
+            sessionID,
+            `Open ${displayUrl} in a browser\nCode: ${code}`,
+            "login",
+          );
         }
       };
 
